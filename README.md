@@ -1,0 +1,28 @@
+# CaptionCheck
+
+用于审查/修正 `data/<sport>/<event>/long_caption.json` 的小工具。
+
+## 安装
+
+使用 `uv` 管理依赖。建议用 Python 3.12/3.13（本机 `python3` 可能是 3.14，PySide6 可能没有对应 wheel）。
+
+```bash
+uv venv --python python3.12
+uv sync
+```
+
+## 配置
+
+复制示例配置并按需修改（外部编辑器命令可替换成你自己的）：
+
+```bash
+cp captioncheck_config.example.json captioncheck_config.json
+```
+
+## 运行
+
+```bash
+uv run python -m captioncheck
+```
+
+首次启动会对数据集做一次增量预处理（每个 `sport/event` 目录生成 `preprocess_status.json`，并把 `spans[].start_frame/end_frame` 变为从 0 开始，同时在 `long_caption.json` 顶层加入 `reviewed` 字段）。
