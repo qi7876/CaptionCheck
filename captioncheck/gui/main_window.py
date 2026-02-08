@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
             item.dir_path.resolve(): item for item in self._items
         }
         self._event_node_by_dir: dict[Path, QTreeWidgetItem] = {}
-        self._suppress_tree_item_changed = False
+        self._review_indicator_by_dir: dict[Path, QCheckBox] = {}
 
         self._current_item: DatasetItem | None = None
         self._fps = 10.0
@@ -58,7 +58,6 @@ class MainWindow(QMainWindow):
         self._tree.setHeaderLabels(["Sport/Event", "Reviewed"])
         self._tree.setMinimumSize(0, 0)
         self._tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
-        self._tree.itemChanged.connect(self._on_tree_item_changed)
         self._populate_tree()
 
         self._video_widget = QVideoWidget()
@@ -199,7 +198,7 @@ class MainWindow(QMainWindow):
     def _populate_tree(self) -> None:
         sport_nodes: dict[str, QTreeWidgetItem] = {}
         self._event_node_by_dir = {}
-        self._suppress_tree_item_changed = True
+        self._review_indicator_by_dir = {}
         for item in self._items:
             sport_node = sport_nodes.get(item.sport)
             if sport_node is None:
@@ -209,21 +208,35 @@ class MainWindow(QMainWindow):
 
             event_node = QTreeWidgetItem([item.event, ""])
             event_node.setData(0, Qt.ItemDataRole.UserRole, str(item.dir_path.resolve()))
-            event_node.setFlags(event_node.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             reviewed = False
             try:
                 long_caption = read_json(item.long_caption_path)
                 reviewed = bool(long_caption.get("reviewed", False))
             except Exception:
                 reviewed = False
-            event_node.setCheckState(1, Qt.CheckState.Checked if reviewed else Qt.CheckState.Unchecked)
-            event_node.setTextAlignment(1, Qt.AlignmentFlag.AlignCenter)
+            reviewed_indicator = QCheckBox()
+            reviewed_indicator.setChecked(reviewed)
+            reviewed_indicator.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            reviewed_indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            reviewed_indicator.setTristate(False)
+
             sport_node.addChild(event_node)
+
+            indicator_container = QWidget()
+            indicator_container.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            indicator_container.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            indicator_layout = QHBoxLayout(indicator_container)
+            indicator_layout.setContentsMargins(0, 0, 0, 0)
+            indicator_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            indicator_layout.addWidget(reviewed_indicator)
+            self._tree.setItemWidget(event_node, 1, indicator_container)
             self._event_node_by_dir[item.dir_path.resolve()] = event_node
+            self._review_indicator_by_dir[item.dir_path.resolve()] = reviewed_indicator
 
         for sport_node in sport_nodes.values():
             sport_node.setExpanded(True)
-        self._suppress_tree_item_changed = False
 
     def _select_first_item(self) -> None:
         top = self._tree.topLevelItem(0)
@@ -418,47 +431,15 @@ class MainWindow(QMainWindow):
         self._speed_combo.setCurrentIndex(index)
 
     def _set_tree_reviewed_state(self, dir_path: Path, reviewed: bool) -> None:
-        node = self._event_node_by_dir.get(dir_path.resolve())
-        if node is None:
+        indicator = self._review_indicator_by_dir.get(dir_path.resolve())
+        if indicator is None:
             return
-        desired = Qt.CheckState.Checked if reviewed else Qt.CheckState.Unchecked
-        if node.checkState(1) == desired:
-            return
-        self._suppress_tree_item_changed = True
-        node.setCheckState(1, desired)
-        self._suppress_tree_item_changed = False
-
-    def _on_tree_item_changed(self, node: QTreeWidgetItem, column: int) -> None:
-        if self._suppress_tree_item_changed:
-            return
-        if column != 1 or node.parent() is None:
-            return
-        dir_str = node.data(0, Qt.ItemDataRole.UserRole)
-        if not dir_str:
-            return
-        item = self._item_by_dir.get(Path(str(dir_str)))
-        if item is None:
-            return
-
-        reviewed = node.checkState(1) == Qt.CheckState.Checked
-        try:
-            long_caption = read_json(item.long_caption_path)
-            long_caption["reviewed"] = bool(reviewed)
-            write_json_atomic(item.long_caption_path, long_caption)
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.critical(self, "Write failed", str(e))
-            self._set_tree_reviewed_state(item.dir_path.resolve(), not reviewed)
-            return
-
-        if self._current_item and self._current_item.dir_path.resolve() == item.dir_path.resolve():
-            self._reviewed_checkbox.blockSignals(True)
-            self._reviewed_checkbox.setChecked(reviewed)
-            self._reviewed_checkbox.blockSignals(False)
+        indicator.setChecked(bool(reviewed))
 
     def _on_reviewed_changed(self, state: int) -> None:
         if self._current_item is None:
             return
-        reviewed = state == Qt.CheckState.Checked
+        reviewed = Qt.CheckState(state) == Qt.CheckState.Checked
         try:
             long_caption = read_json(self._current_item.long_caption_path)
             long_caption["reviewed"] = bool(reviewed)
