@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QUrl
+from PySide6.QtCore import QEvent, QTimer, Qt, QUrl
 from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -66,11 +66,15 @@ class MainWindow(QMainWindow):
         self._video_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._video_widget.setMinimumSize(0, 0)
         self._player = QMediaPlayer(self)
-        self._player.setNotifyInterval(5)
+        if hasattr(self._player, "setNotifyInterval"):
+            self._player.setNotifyInterval(5)
         self._audio = QAudioOutput(self)
         self._player.setAudioOutput(self._audio)
         self._player.setVideoOutput(self._video_widget)
         self._player.positionChanged.connect(self._on_position_changed)
+        self._step_poll_timer = QTimer(self)
+        self._step_poll_timer.setInterval(10)
+        self._step_poll_timer.timeout.connect(self._poll_step_position)
 
         self._play_button = QPushButton("Play")
         self._play_button.clicked.connect(self._toggle_play)
@@ -372,12 +376,20 @@ class MainWindow(QMainWindow):
         self._step_target_frame = int(target_frame)
         self._player.setPlaybackRate(4.0)
         self._player.play()
+        self._step_poll_timer.start()
 
     def _start_backward_step(self, target_frame: int) -> None:
         self._step_in_progress = True
         self._step_direction = -1
         self._step_target_frame = int(target_frame)
         self._player.setPosition(self._position_ms_from_frame(int(target_frame)))
+        self._step_poll_timer.start()
+
+    def _poll_step_position(self) -> None:
+        if not self._step_in_progress:
+            self._step_poll_timer.stop()
+            return
+        self._on_position_changed(self._player.position())
 
     def _maybe_finish_step(self, current_frame: int) -> None:
         if not self._step_in_progress or self._step_target_frame is None:
@@ -393,6 +405,7 @@ class MainWindow(QMainWindow):
         self._player.pause()
         self._play_button.setText("Play")
         self._player.setPlaybackRate(float(self._speed_combo.currentData()))
+        self._step_poll_timer.stop()
         self._step_in_progress = False
         self._step_direction = 0
         self._step_target_frame = None
