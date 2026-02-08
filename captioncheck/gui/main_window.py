@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSlider,
     QTreeWidget,
     QTreeWidgetItem,
@@ -62,7 +63,7 @@ class MainWindow(QMainWindow):
         self._play_button.clicked.connect(self._toggle_play)
 
         self._speed_combo = QComboBox()
-        for rate in [0.25, 0.5, 1.0, 1.5, 2.0]:
+        for rate in [0.25, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0]:
             self._speed_combo.addItem(f"{rate:g}x", rate)
         self._speed_combo.setCurrentIndex(2)
         self._speed_combo.currentIndexChanged.connect(self._on_speed_changed)
@@ -80,6 +81,16 @@ class MainWindow(QMainWindow):
         self._reviewed_checkbox = QCheckBox("Reviewed")
         self._reviewed_checkbox.stateChanged.connect(self._on_reviewed_changed)
 
+        self._frame_jump = QSpinBox()
+        self._frame_jump.setRange(0, 0)
+        self._frame_jump.setSingleStep(1)
+        self._frame_jump.setKeyboardTracking(False)
+        self._frame_jump.setMinimumWidth(110)
+        self._frame_jump.editingFinished.connect(self._jump_to_spinbox_frame)
+
+        self._jump_button = QPushButton("Jump")
+        self._jump_button.clicked.connect(self._jump_to_spinbox_frame)
+
         self._open_json_button = QPushButton("Open JSON")
         self._open_json_button.clicked.connect(self._open_current_json)
 
@@ -87,6 +98,10 @@ class MainWindow(QMainWindow):
         controls.addWidget(self._play_button)
         controls.addWidget(QLabel("Speed:"))
         controls.addWidget(self._speed_combo)
+        controls.addSpacing(12)
+        controls.addWidget(QLabel("Frame:"))
+        controls.addWidget(self._frame_jump)
+        controls.addWidget(self._jump_button)
         controls.addStretch(1)
         controls.addWidget(self._frame_info)
         controls.addWidget(self._reviewed_checkbox)
@@ -172,6 +187,15 @@ class MainWindow(QMainWindow):
         else:
             self._frame_slider.setRange(0, 0)
 
+        self._frame_jump.blockSignals(True)
+        if self._total_frames > 0:
+            self._frame_jump.setRange(0, max(0, self._total_frames - 1))
+            self._frame_jump.setValue(0)
+        else:
+            self._frame_jump.setRange(0, 0)
+            self._frame_jump.setValue(0)
+        self._frame_jump.blockSignals(False)
+
         self._suppress_seek = True
         self._frame_slider.setValue(0)
         self._suppress_seek = False
@@ -215,6 +239,10 @@ class MainWindow(QMainWindow):
         self._suppress_seek = True
         self._frame_slider.setValue(frame)
         self._suppress_seek = False
+        if not self._frame_jump.hasFocus():
+            self._frame_jump.blockSignals(True)
+            self._frame_jump.setValue(frame)
+            self._frame_jump.blockSignals(False)
         self._update_frame_info(frame)
 
     def _frame_from_position_ms(self, position_ms: int) -> int:
@@ -251,6 +279,16 @@ class MainWindow(QMainWindow):
             self._frame_info.setText(f"Frame: {frame} / {self._total_frames - 1} (total {self._total_frames})")
         else:
             self._frame_info.setText("Frame: - / -")
+
+    def _jump_to_spinbox_frame(self) -> None:
+        self._jump_to_frame(self._frame_jump.value())
+
+    def _jump_to_frame(self, frame: int) -> None:
+        if self._total_frames <= 0:
+            return
+        frame = max(0, min(int(frame), self._total_frames - 1))
+        self._frame_slider.setValue(frame)
+        self._seek_to_frame(frame)
 
     def _on_reviewed_changed(self, state: int) -> None:
         if self._current_item is None:
