@@ -49,7 +49,6 @@ class MainWindow(QMainWindow):
         self._step_hold_left = False
         self._step_hold_right = False
         self._step_in_progress = False
-        self._step_direction = 0
         self._step_target_frame: int | None = None
 
         self.setWindowTitle("CaptionCheck")
@@ -74,7 +73,7 @@ class MainWindow(QMainWindow):
         self._player.positionChanged.connect(self._on_position_changed)
         self._step_poll_timer = QTimer(self)
         self._step_poll_timer.setInterval(10)
-        self._step_poll_timer.timeout.connect(self._poll_step_position)
+        self._step_poll_timer.timeout.connect(self._on_step_tick)
 
         self._play_button = QPushButton("Play")
         self._play_button.clicked.connect(self._toggle_play)
@@ -195,7 +194,7 @@ class MainWindow(QMainWindow):
                     if not event.isAutoRepeat():
                         self._step_hold_right = False
                     return True
-        return super().eventFilter(watched, event)
+        return False
 
     def _populate_tree(self) -> None:
         sport_nodes: dict[str, QTreeWidgetItem] = {}
@@ -313,6 +312,9 @@ class MainWindow(QMainWindow):
     def _on_position_changed(self, position_ms: int) -> None:
         if self._slider_dragging:
             return
+        self._update_position_ui(position_ms)
+
+    def _update_position_ui(self, position_ms: int) -> int:
         frame = self._frame_from_position_ms(position_ms)
         if frame < 0:
             frame = 0
@@ -326,7 +328,7 @@ class MainWindow(QMainWindow):
             self._frame_jump.setValue(frame)
             self._frame_jump.blockSignals(False)
         self._update_frame_info(frame)
-        self._maybe_finish_step(frame)
+        return frame
 
     def _frame_from_position_ms(self, position_ms: int) -> int:
         if self._fps <= 0:
@@ -365,51 +367,33 @@ class MainWindow(QMainWindow):
         target_frame = current_frame + direction
         if target_frame < 0 or target_frame >= self._total_frames:
             return
-        if direction > 0:
-            self._start_forward_step(target_frame)
-        else:
-            self._start_backward_step(target_frame)
+        self._start_step(direction, target_frame)
 
-    def _start_forward_step(self, target_frame: int) -> None:
+    def _start_step(self, direction: int, target_frame: int) -> None:
         self._step_in_progress = True
-        self._step_direction = 1
         self._step_target_frame = int(target_frame)
-        self._player.setPlaybackRate(4.0)
+        step_rate = 8.0 if direction < 0 else 4.0
+        if direction < 0:
+            self._player.setPosition(self._position_ms_from_frame(int(target_frame)))
+        self._player.setPlaybackRate(step_rate)
         self._player.play()
         self._step_poll_timer.start()
 
-    def _start_backward_step(self, target_frame: int) -> None:
-        self._step_in_progress = True
-        self._step_direction = -1
-        self._step_target_frame = int(target_frame)
-        self._player.setPosition(self._position_ms_from_frame(int(target_frame)))
-        self._step_poll_timer.start()
-
-    def _poll_step_position(self) -> None:
-        if not self._step_in_progress:
+    def _on_step_tick(self) -> None:
+        if not self._step_in_progress or self._step_target_frame is None:
             self._step_poll_timer.stop()
             return
-        self._on_position_changed(self._player.position())
-
-    def _maybe_finish_step(self, current_frame: int) -> None:
-        if not self._step_in_progress or self._step_target_frame is None:
+        current_frame = self._update_position_ui(self._player.position())
+        if current_frame < self._step_target_frame:
             return
-        target = self._step_target_frame
-        if self._step_direction > 0:
-            if current_frame < target:
-                return
-        else:
-            if current_frame > target:
-                return
 
+        self._step_poll_timer.stop()
         self._player.pause()
         self._play_button.setText("Play")
         self._player.setPlaybackRate(float(self._speed_combo.currentData()))
-        self._step_poll_timer.stop()
         self._step_in_progress = False
-        self._step_direction = 0
         self._step_target_frame = None
-        self._maybe_start_step()
+        QTimer.singleShot(0, self._maybe_start_step)
 
     def _update_frame_info(self, frame: int) -> None:
         if self._total_frames:
