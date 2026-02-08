@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QShortcut,
     QSlider,
     QTreeWidget,
     QTreeWidgetItem,
@@ -271,4 +270,3 @@ class MainWindow(QMainWindow):
             open_path_in_editor(self._current_item.long_caption_path, self._config.external_editor)
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "Open failed", str(e))
-
