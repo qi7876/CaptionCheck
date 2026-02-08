@@ -4,7 +4,7 @@
 
 ## 安装
 
-使用 `uv` 管理依赖。建议用 Python 3.12/3.13（本机 `python3` 可能是 3.14，PySide6 可能没有对应 wheel）。
+使用 `uv` 管理依赖。建议用 Python 3.12.x（仓库已提供 `.python-version`）。
 
 ```bash
 uv venv --python python3.12

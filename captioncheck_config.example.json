@@ -1,7 +1,0 @@
-{
-  "data_root": "data",
-  "external_editor": {
-    "command": ["open", "-a", "Visual Studio Code"]
-  }
-}
-
