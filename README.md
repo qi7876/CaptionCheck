@@ -13,11 +13,7 @@ uv sync
 
 ## 配置
 
-复制示例配置并按需修改（外部编辑器命令可替换成你自己的）：
-
-```bash
-cp captioncheck_config.example.json captioncheck_config.json
-```
+仓库内已提供默认配置 `captioncheck_config.json`，可按需修改（例如外部编辑器命令）。
 
 ## 运行
 

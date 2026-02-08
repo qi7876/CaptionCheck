@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._tree.setColumnWidth(1, 90)
+        self._tree.setColumnWidth(1, 68)
         self._tree.setMinimumSize(0, 0)
         self._tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         self._populate_tree()
