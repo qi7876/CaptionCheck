@@ -391,7 +391,7 @@ class MainWindow(QMainWindow):
     def _start_step(self, direction: int, target_frame: int) -> None:
         self._step_in_progress = True
         self._step_target_frame = int(target_frame)
-        step_rate = 8.0 if direction < 0 else 2.0
+        step_rate = 2.0
         if direction < 0:
             self._player.setPosition(self._position_ms_from_frame(int(target_frame)))
         self._player.setPlaybackRate(step_rate)
