@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QHeaderView,
     QSplitter,
     QSpinBox,
     QSlider,
@@ -56,6 +57,11 @@ class MainWindow(QMainWindow):
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Sport/Event", "Reviewed"])
+        header = self._tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._tree.setColumnWidth(1, 90)
         self._tree.setMinimumSize(0, 0)
         self._tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         self._populate_tree()
