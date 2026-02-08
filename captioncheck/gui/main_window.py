@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QUrl
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -46,6 +46,11 @@ class MainWindow(QMainWindow):
         self._total_frames = 0
         self._suppress_seek = False
         self._slider_dragging = False
+        self._step_hold_left = False
+        self._step_hold_right = False
+        self._step_in_progress = False
+        self._step_direction = 0
+        self._step_target_frame: int | None = None
 
         self.setWindowTitle("CaptionCheck")
         self.resize(1200, 800)
@@ -61,6 +66,7 @@ class MainWindow(QMainWindow):
         self._video_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._video_widget.setMinimumSize(0, 0)
         self._player = QMediaPlayer(self)
+        self._player.setNotifyInterval(5)
         self._audio = QAudioOutput(self)
         self._player.setAudioOutput(self._audio)
         self._player.setVideoOutput(self._video_widget)
@@ -135,8 +141,6 @@ class MainWindow(QMainWindow):
         main_splitter.setStretchFactor(1, 1)
         self.setCentralWidget(main_splitter)
 
-        QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=lambda: self._step_frames(-1))
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self, activated=lambda: self._step_frames(1))
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=self._toggle_play)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._step_speed(1))
         QShortcut(QKeySequence(Qt.Key.Key_Down), self, activated=lambda: self._step_speed(-1))
@@ -160,6 +164,33 @@ class MainWindow(QMainWindow):
                     local_pos = self._frame_jump.mapFromGlobal(global_pos)
                     if not self._frame_jump.rect().contains(local_pos):
                         self._frame_jump.clearFocus()
+        if isinstance(event, QKeyEvent):
+            if not self.isActiveWindow():
+                return super().eventFilter(watched, event)
+            if self._frame_jump.hasFocus() or self._frame_jump.lineEdit().hasFocus():
+                return super().eventFilter(watched, event)
+
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_Left:
+                    if not event.isAutoRepeat():
+                        self._step_hold_left = True
+                        self._maybe_start_step()
+                    return True
+                if event.key() == Qt.Key.Key_Right:
+                    if not event.isAutoRepeat():
+                        self._step_hold_right = True
+                        self._maybe_start_step()
+                    return True
+
+            if event.type() == QEvent.Type.KeyRelease:
+                if event.key() == Qt.Key.Key_Left:
+                    if not event.isAutoRepeat():
+                        self._step_hold_left = False
+                    return True
+                if event.key() == Qt.Key.Key_Right:
+                    if not event.isAutoRepeat():
+                        self._step_hold_right = False
+                    return True
         return super().eventFilter(watched, event)
 
     def _populate_tree(self) -> None:
@@ -291,11 +322,12 @@ class MainWindow(QMainWindow):
             self._frame_jump.setValue(frame)
             self._frame_jump.blockSignals(False)
         self._update_frame_info(frame)
+        self._maybe_finish_step(frame)
 
     def _frame_from_position_ms(self, position_ms: int) -> int:
         if self._fps <= 0:
             return 0
-        return int(round((position_ms / 1000.0) * self._fps))
+        return int((position_ms * self._fps) / 1000.0 + 1e-6)
 
     def _position_ms_from_frame(self, frame: int) -> int:
         if self._fps <= 0:
@@ -310,16 +342,61 @@ class MainWindow(QMainWindow):
             frame = min(frame, self._total_frames - 1)
         self._player.setPosition(self._position_ms_from_frame(frame))
 
-    def _step_frames(self, delta: int) -> None:
-        if self._total_frames <= 0:
+    def _maybe_start_step(self) -> None:
+        if self._step_in_progress or self._total_frames <= 0 or self._slider_dragging:
             return
+        direction = 0
+        if self._step_hold_right and not self._step_hold_left:
+            direction = 1
+        if self._step_hold_left and not self._step_hold_right:
+            direction = -1
+        if direction == 0:
+            return
+
         if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._player.pause()
             self._play_button.setText("Play")
-        frame = self._frame_slider.value() + int(delta)
-        frame = max(0, min(frame, self._total_frames - 1))
-        self._frame_slider.setValue(frame)
-        self._seek_to_frame(frame)
+
+        current_frame = self._frame_slider.value()
+        target_frame = current_frame + direction
+        if target_frame < 0 or target_frame >= self._total_frames:
+            return
+        if direction > 0:
+            self._start_forward_step(target_frame)
+        else:
+            self._start_backward_step(target_frame)
+
+    def _start_forward_step(self, target_frame: int) -> None:
+        self._step_in_progress = True
+        self._step_direction = 1
+        self._step_target_frame = int(target_frame)
+        self._player.setPlaybackRate(4.0)
+        self._player.play()
+
+    def _start_backward_step(self, target_frame: int) -> None:
+        self._step_in_progress = True
+        self._step_direction = -1
+        self._step_target_frame = int(target_frame)
+        self._player.setPosition(self._position_ms_from_frame(int(target_frame)))
+
+    def _maybe_finish_step(self, current_frame: int) -> None:
+        if not self._step_in_progress or self._step_target_frame is None:
+            return
+        target = self._step_target_frame
+        if self._step_direction > 0:
+            if current_frame < target:
+                return
+        else:
+            if current_frame > target:
+                return
+
+        self._player.pause()
+        self._play_button.setText("Play")
+        self._player.setPlaybackRate(float(self._speed_combo.currentData()))
+        self._step_in_progress = False
+        self._step_direction = 0
+        self._step_target_frame = None
+        self._maybe_start_step()
 
     def _update_frame_info(self, frame: int) -> None:
         if self._total_frames:
