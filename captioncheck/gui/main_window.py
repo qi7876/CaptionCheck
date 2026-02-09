@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QSlider,
     QTreeWidget,
@@ -103,6 +104,7 @@ class MainWindow(QMainWindow):
         self._frame_view.setMinimumSize(0, 0)
         self._frame_view.setStyleSheet("background-color: black; color: white;")
         self._frame_view.setScaledContents(True)
+        self._frame_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
 
         self._play_button = QPushButton("Play")
         self._play_button.clicked.connect(self._toggle_play)
