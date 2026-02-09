@@ -18,7 +18,7 @@ uv sync
 ## 运行
 
 ```bash
-uv run python -m captioncheck
+uv run captioncheck
 ```
 
 首次启动会对数据集做一次增量预处理（每个 `sport/event` 目录生成 `preprocess_status.json`，并把 `spans[].start_frame/end_frame` 变为从 0 开始，同时在 `long_caption.json` 顶层加入 `reviewed` 字段）。
