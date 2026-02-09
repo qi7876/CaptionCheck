@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
 
         self._frames_dir: Path | None = None
         self._pixmap_cache: OrderedDict[int, QPixmap] = OrderedDict()
+        self._current_base_pixmap: QPixmap | None = None
 
         self._ffmpeg_path = shutil.which("ffmpeg")
         self._gen_process: QProcess | None = None
@@ -103,8 +104,9 @@ class MainWindow(QMainWindow):
         self._frame_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._frame_view.setMinimumSize(0, 0)
         self._frame_view.setStyleSheet("background-color: black; color: white;")
-        self._frame_view.setScaledContents(True)
+        self._frame_view.setScaledContents(False)
         self._frame_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self._frame_view.installEventFilter(self)
 
         self._play_button = QPushButton("Play")
         self._play_button.clicked.connect(self._toggle_play)
@@ -187,6 +189,9 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)  # type: ignore[misc]
 
     def eventFilter(self, watched: object, event: object) -> bool:  # noqa: N802
+        if watched is self._frame_view and isinstance(event, QEvent):
+            if event.type() == QEvent.Type.Resize and self._current_base_pixmap is not None:
+                self._set_frame_view_pixmap(self._current_base_pixmap)
         if isinstance(event, QKeyEvent):
             if not self.isActiveWindow():
                 return super().eventFilter(watched, event)
@@ -391,22 +396,26 @@ class MainWindow(QMainWindow):
     def _display_frame(self, frame: int) -> None:
         frames_dir = self._frames_dir
         if frames_dir is None:
+            self._current_base_pixmap = None
             return
         pixmap = self._pixmap_cache.get(frame)
         if pixmap is not None and not pixmap.isNull():
             self._pixmap_cache.move_to_end(frame)
+            self._current_base_pixmap = pixmap
             self._frame_view.setText("")
-            self._frame_view.setPixmap(pixmap)
+            self._set_frame_view_pixmap(pixmap)
             return
 
         frame_path = frames_dir / f"{frame:06d}.jpg"
         if not frame_path.exists():
+            self._current_base_pixmap = None
             self._frame_view.setPixmap(QPixmap())
             self._frame_view.setText(f"Missing frame {frame}")
             return
 
         pixmap = QPixmap(str(frame_path))
         if pixmap.isNull():
+            self._current_base_pixmap = None
             self._frame_view.setPixmap(QPixmap())
             self._frame_view.setText(f"Failed to load frame {frame}")
             return
@@ -415,8 +424,21 @@ class MainWindow(QMainWindow):
         self._pixmap_cache.move_to_end(frame)
         while len(self._pixmap_cache) > self._PIXMAP_CACHE_SIZE:
             self._pixmap_cache.popitem(last=False)
+        self._current_base_pixmap = pixmap
         self._frame_view.setText("")
-        self._frame_view.setPixmap(pixmap)
+        self._set_frame_view_pixmap(pixmap)
+
+    def _set_frame_view_pixmap(self, pixmap: QPixmap) -> None:
+        target_size = self._frame_view.contentsRect().size()
+        if target_size.width() <= 0 or target_size.height() <= 0:
+            self._frame_view.setPixmap(pixmap)
+            return
+        scaled = pixmap.scaled(
+            target_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self._frame_view.setPixmap(scaled)
 
     def _on_play_tick(self) -> None:
         if not self._playing or not self._frames_ready() or self._fps <= 0:
