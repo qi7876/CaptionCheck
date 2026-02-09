@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QEvent, QTimer, Qt, QUrl
-from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QHeaderView,
+    QPlainTextEdit,
     QSplitter,
     QSpinBox,
     QSlider,
@@ -51,6 +53,10 @@ class MainWindow(QMainWindow):
         self._step_hold_right = False
         self._step_in_progress = False
         self._step_target_frame: int | None = None
+        self._current_long_caption: dict[str, Any] | None = None
+        self._current_spans: list[dict[str, Any]] = []
+        self._caption_span_index: int | None = None
+        self._caption_dirty = False
 
         self.setWindowTitle("CaptionCheck")
         self.resize(1200, 800)
@@ -114,6 +120,17 @@ class MainWindow(QMainWindow):
         self._open_json_button = QPushButton("Open JSON")
         self._open_json_button.clicked.connect(self._open_current_json)
 
+        self._caption_span_info = QLabel("Span: -")
+        self._caption_edit = QPlainTextEdit()
+        self._caption_edit.setMinimumSize(0, 0)
+        self._caption_edit.setPlaceholderText("No caption for current frame")
+        self._caption_edit.setReadOnly(True)
+        self._caption_edit.textChanged.connect(self._on_caption_text_changed)
+        self._caption_save_timer = QTimer(self)
+        self._caption_save_timer.setSingleShot(True)
+        self._caption_save_timer.setInterval(500)
+        self._caption_save_timer.timeout.connect(self._flush_caption_edit)
+
         controls = QHBoxLayout()
         controls.addWidget(self._play_button)
         controls.addWidget(QLabel("Speed:"))
@@ -132,6 +149,12 @@ class MainWindow(QMainWindow):
         bottom_layout = QVBoxLayout()
         bottom_layout.addWidget(self._frame_slider)
         bottom_layout.addLayout(controls)
+        caption_header = QHBoxLayout()
+        caption_header.addWidget(QLabel("Caption:"))
+        caption_header.addStretch(1)
+        caption_header.addWidget(self._caption_span_info)
+        bottom_layout.addLayout(caption_header)
+        bottom_layout.addWidget(self._caption_edit, 1)
         bottom_widget.setLayout(bottom_layout)
 
         right_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -149,10 +172,6 @@ class MainWindow(QMainWindow):
         main_splitter.setStretchFactor(1, 1)
         self.setCentralWidget(main_splitter)
 
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=self._toggle_play)
-        QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._step_speed(1))
-        QShortcut(QKeySequence(Qt.Key.Key_Down), self, activated=lambda: self._step_speed(-1))
-
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -162,23 +181,44 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched: object, event: object) -> bool:  # noqa: N802
         if isinstance(event, QEvent) and event.type() == QEvent.Type.MouseButtonPress:
-            if self._frame_jump.hasFocus() or self._frame_jump.lineEdit().hasFocus():
-                global_pos = None
-                if hasattr(event, "globalPosition"):
-                    global_pos = event.globalPosition().toPoint()
-                elif hasattr(event, "globalPos"):
-                    global_pos = event.globalPos()
-                if global_pos is not None:
+            global_pos = None
+            if hasattr(event, "globalPosition"):
+                global_pos = event.globalPosition().toPoint()
+            elif hasattr(event, "globalPos"):
+                global_pos = event.globalPos()
+            if global_pos is not None:
+                if self._frame_jump.hasFocus() or self._frame_jump.lineEdit().hasFocus():
                     local_pos = self._frame_jump.mapFromGlobal(global_pos)
                     if not self._frame_jump.rect().contains(local_pos):
                         self._frame_jump.clearFocus()
+                if self._caption_edit.hasFocus() or self._caption_edit.viewport().hasFocus():
+                    local_pos = self._caption_edit.mapFromGlobal(global_pos)
+                    if not self._caption_edit.rect().contains(local_pos):
+                        self._caption_edit.clearFocus()
         if isinstance(event, QKeyEvent):
             if not self.isActiveWindow():
                 return super().eventFilter(watched, event)
-            if self._frame_jump.hasFocus() or self._frame_jump.lineEdit().hasFocus():
+            if (
+                self._frame_jump.hasFocus()
+                or self._frame_jump.lineEdit().hasFocus()
+                or self._caption_edit.hasFocus()
+                or self._caption_edit.viewport().hasFocus()
+            ):
                 return super().eventFilter(watched, event)
 
             if event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_Space:
+                    if not event.isAutoRepeat():
+                        self._toggle_play()
+                    return True
+                if event.key() == Qt.Key.Key_Up:
+                    if not event.isAutoRepeat():
+                        self._step_speed(1)
+                    return True
+                if event.key() == Qt.Key.Key_Down:
+                    if not event.isAutoRepeat():
+                        self._step_speed(-1)
+                    return True
                 if event.key() == Qt.Key.Key_Left:
                     if not event.isAutoRepeat():
                         self._step_hold_left = True
@@ -267,11 +307,22 @@ class MainWindow(QMainWindow):
         if self._current_item and self._current_item.dir_path.resolve() == item.dir_path.resolve():
             return
 
+        self._flush_caption_edit()
+        if self._caption_dirty:
+            return
         self._player.pause()
         self._play_button.setText("Play")
         self._current_item = item
 
         long_caption = read_json(item.long_caption_path)
+        spans = long_caption.get("spans")
+        if not isinstance(spans, list):
+            spans = []
+            long_caption["spans"] = spans
+        self._current_long_caption = long_caption
+        self._current_spans = spans
+        self._caption_span_index = None
+        self._set_caption_span(None)
         info = long_caption.get("info") or {}
         self._fps = float(info.get("fps") or 10.0)
         self._total_frames = int(info.get("total_frames") or 0)
@@ -301,6 +352,7 @@ class MainWindow(QMainWindow):
         self._suppress_seek = False
 
         self._update_frame_info(0)
+        self._update_caption_panel(0)
 
         self._player.setSource(QUrl.fromLocalFile(str(item.video_path.resolve())))
         self._player.setPlaybackRate(float(self._speed_combo.currentData()))
@@ -326,6 +378,7 @@ class MainWindow(QMainWindow):
 
     def _on_slider_moved(self, frame: int) -> None:
         self._update_frame_info(frame)
+        self._update_caption_panel(frame)
         self._seek_to_frame(frame)
 
     def _on_position_changed(self, position_ms: int) -> None:
@@ -347,6 +400,7 @@ class MainWindow(QMainWindow):
             self._frame_jump.setValue(frame)
             self._frame_jump.blockSignals(False)
         self._update_frame_info(frame)
+        self._update_caption_panel(frame)
         return frame
 
     def _frame_from_position_ms(self, position_ms: int) -> int:
@@ -436,6 +490,106 @@ class MainWindow(QMainWindow):
         index = max(0, min(index + int(delta), self._speed_combo.count() - 1))
         self._speed_combo.setCurrentIndex(index)
 
+    def _span_frame_range(self, span: dict[str, Any]) -> tuple[int, int]:
+        start = int(span.get("start_frame") or 0)
+        end = int(span.get("end_frame") or start)
+        if end < start:
+            start, end = end, start
+        return start, end
+
+    def _span_index_for_frame(self, frame: int) -> int | None:
+        if not self._current_spans:
+            return None
+
+        current = self._caption_span_index
+        if current is not None and 0 <= current < len(self._current_spans):
+            start, end = self._span_frame_range(self._current_spans[current])
+            if start <= frame <= end:
+                return current
+            if frame > end:
+                idx = current + 1
+                while idx < len(self._current_spans):
+                    start, end = self._span_frame_range(self._current_spans[idx])
+                    if start <= frame <= end:
+                        return idx
+                    if frame < start:
+                        break
+                    idx += 1
+            else:
+                idx = current - 1
+                while idx >= 0:
+                    start, end = self._span_frame_range(self._current_spans[idx])
+                    if start <= frame <= end:
+                        return idx
+                    if frame > end:
+                        break
+                    idx -= 1
+
+        for idx, span in enumerate(self._current_spans):
+            start, end = self._span_frame_range(span)
+            if start <= frame <= end:
+                return idx
+        return None
+
+    def _update_caption_panel(self, frame: int) -> None:
+        span_index = self._span_index_for_frame(frame)
+        if span_index == self._caption_span_index:
+            return
+        if self._caption_dirty:
+            self._flush_caption_edit()
+            if self._caption_dirty:
+                return
+        self._set_caption_span(span_index)
+
+    def _set_caption_span(self, span_index: int | None) -> None:
+        if span_index is not None and not (0 <= span_index < len(self._current_spans)):
+            span_index = None
+
+        self._caption_span_index = span_index
+        self._caption_save_timer.stop()
+        self._caption_dirty = False
+
+        self._caption_edit.blockSignals(True)
+        try:
+            if span_index is None:
+                self._caption_span_info.setText("Span: (none)")
+                self._caption_edit.setPlainText("")
+                self._caption_edit.setReadOnly(True)
+                return
+
+            span = self._current_spans[span_index]
+            start, end = self._span_frame_range(span)
+            length = max(0, end - start + 1)
+            self._caption_span_info.setText(f"Span: {start} - {end} (len {length})")
+            self._caption_edit.setPlainText(str(span.get("caption") or ""))
+            self._caption_edit.setReadOnly(False)
+        finally:
+            self._caption_edit.blockSignals(False)
+
+    def _on_caption_text_changed(self) -> None:
+        if self._caption_span_index is None or self._current_long_caption is None:
+            return
+        if not (0 <= self._caption_span_index < len(self._current_spans)):
+            return
+        self._current_spans[self._caption_span_index]["caption"] = self._caption_edit.toPlainText()
+        self._caption_dirty = True
+        self._caption_save_timer.start()
+
+    def _flush_caption_edit(self) -> None:
+        if not self._caption_dirty:
+            return
+        if self._current_item is None or self._current_long_caption is None:
+            self._caption_dirty = False
+            self._caption_save_timer.stop()
+            return
+        try:
+            write_json_atomic(self._current_item.long_caption_path, self._current_long_caption)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "Write failed", str(e))
+            return
+        self._caption_dirty = False
+        self._caption_save_timer.stop()
+
     def _set_tree_reviewed_state(self, dir_path: Path, reviewed: bool) -> None:
         indicator = self._review_indicator_by_dir.get(dir_path.resolve())
         if indicator is None:
@@ -443,20 +597,29 @@ class MainWindow(QMainWindow):
         indicator.setChecked(bool(reviewed))
 
     def _on_reviewed_changed(self, state: int) -> None:
-        if self._current_item is None:
+        if self._current_item is None or self._current_long_caption is None:
             return
         reviewed = Qt.CheckState(state) == Qt.CheckState.Checked
+        previous = bool(self._current_long_caption.get("reviewed", False))
+        self._current_long_caption["reviewed"] = bool(reviewed)
         try:
-            long_caption = read_json(self._current_item.long_caption_path)
-            long_caption["reviewed"] = bool(reviewed)
-            write_json_atomic(self._current_item.long_caption_path, long_caption)
+            write_json_atomic(self._current_item.long_caption_path, self._current_long_caption)
         except Exception as e:  # noqa: BLE001
+            self._current_long_caption["reviewed"] = previous
+            self._reviewed_checkbox.blockSignals(True)
+            self._reviewed_checkbox.setChecked(previous)
+            self._reviewed_checkbox.blockSignals(False)
             QMessageBox.critical(self, "Write failed", str(e))
             return
+        self._caption_dirty = False
+        self._caption_save_timer.stop()
         self._set_tree_reviewed_state(self._current_item.dir_path.resolve(), bool(reviewed))
 
     def _open_current_json(self) -> None:
         if self._current_item is None:
+            return
+        self._flush_caption_edit()
+        if self._caption_dirty:
             return
         try:
             open_path_in_editor(self._current_item.long_caption_path, self._config.external_editor)
