@@ -21,6 +21,8 @@ def iter_dataset_items(data_root: Path) -> list[DatasetItem]:
         return items
 
     for sport_dir in sorted([p for p in data_root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        if sport_dir.name in {"tmp"}:
+            continue
         for event_dir in sorted([p for p in sport_dir.iterdir() if p.is_dir()], key=lambda p: p.name):
             video_path = event_dir / "segment.mp4"
             long_caption_path = event_dir / "long_caption.json"
@@ -40,4 +42,3 @@ def iter_dataset_items(data_root: Path) -> list[DatasetItem]:
                     )
                 )
     return items
-
