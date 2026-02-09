@@ -1,6 +1,6 @@
 {
   "data_root": "data",
   "external_editor": {
-    "command": ["code"]
+    "command": ["zed"]
   }
 }
