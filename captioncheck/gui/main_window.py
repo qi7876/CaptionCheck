@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
         delta = now - self._step_last_time
         self._step_last_time = now
 
-        step_rate = 1.0
+        step_rate = float(self._speed_combo.currentData() or 1.0)
         self._step_frame_accum += delta * self._fps * step_rate
         advance = int(self._step_frame_accum)
         if advance <= 0:
