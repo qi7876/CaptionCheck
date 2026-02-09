@@ -179,6 +179,13 @@ class MainWindow(QMainWindow):
         if self._items:
             self._select_first_item()
 
+    def closeEvent(self, event: object) -> None:  # noqa: N802
+        self._flush_caption_edit()
+        if self._caption_dirty and hasattr(event, "ignore"):
+            event.ignore()
+            return
+        super().closeEvent(event)  # type: ignore[misc]
+
     def eventFilter(self, watched: object, event: object) -> bool:  # noqa: N802
         if isinstance(event, QEvent) and event.type() == QEvent.Type.MouseButtonPress:
             global_pos = None
