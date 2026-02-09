@@ -124,10 +124,10 @@ class MainWindow(QMainWindow):
         self._frame_slider.sliderReleased.connect(self._on_slider_released)
         self._frame_slider.sliderMoved.connect(self._on_slider_moved)
 
-        self._frame_info = QLabel("Frame: - / -")
+        self._frame_info = QLabel("- / -")
         self._frame_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         frame_font = QFont(self._frame_info.font())
-        frame_font.setPointSize(frame_font.pointSize() + 4)
+        frame_font.setPointSize(frame_font.pointSize() + 6)
         self._frame_info.setFont(frame_font)
 
         self._reviewed_checkbox = QCheckBox("Reviewed")
@@ -528,11 +528,9 @@ class MainWindow(QMainWindow):
 
     def _update_frame_info(self, frame: int) -> None:
         if self._total_frames:
-            self._frame_info.setText(
-                f"Frame: {frame} / {self._total_frames - 1} (total {self._total_frames})"
-            )
+            self._frame_info.setText(f"{frame} / {self._total_frames - 1}")
         else:
-            self._frame_info.setText("Frame: - / -")
+            self._frame_info.setText("- / -")
 
     def _frames_ready(self) -> bool:
         return self._frames_dir is not None and self._total_frames > 0
