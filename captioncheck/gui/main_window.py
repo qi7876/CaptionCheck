@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEvent, QProcess, QTimer, Qt
-from PySide6.QtGui import QKeyEvent, QPixmap
+from PySide6.QtGui import QFont, QKeyEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -125,6 +125,10 @@ class MainWindow(QMainWindow):
         self._frame_slider.sliderMoved.connect(self._on_slider_moved)
 
         self._frame_info = QLabel("Frame: - / -")
+        self._frame_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        frame_font = QFont(self._frame_info.font())
+        frame_font.setPointSize(frame_font.pointSize() + 4)
+        self._frame_info.setFont(frame_font)
 
         self._reviewed_checkbox = QCheckBox("Reviewed")
         self._reviewed_checkbox.stateChanged.connect(self._on_reviewed_changed)
@@ -141,7 +145,6 @@ class MainWindow(QMainWindow):
         controls.addWidget(self._speed_combo)
         controls.addSpacing(12)
         controls.addStretch(1)
-        controls.addWidget(self._frame_info)
         controls.addWidget(self._reviewed_checkbox)
         controls.addWidget(self._open_json_button)
         controls.addWidget(self._clear_frames_button)
@@ -150,6 +153,7 @@ class MainWindow(QMainWindow):
         bottom_widget.setMinimumSize(0, 0)
         bottom_layout = QVBoxLayout()
         bottom_layout.addWidget(self._frame_slider)
+        bottom_layout.addWidget(self._frame_info)
         bottom_layout.addLayout(controls)
         bottom_widget.setLayout(bottom_layout)
 
